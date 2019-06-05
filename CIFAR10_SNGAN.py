@@ -13,21 +13,22 @@ import sys
 import os
 import pickle
 
+from tboard_functions import make_tb_callback, write_log
 
 arg_list = sys.argv
 plt.switch_backend('agg') 
 #Hyperperemeter
 BATCHSIZE=64
 LEARNING_RATE = 0.0002
-TRAINING_RATIO = 1
+TRAINING_RATIO = 2 #train descriminator more
 BETA_1 = 0.0
 BETA_2 = 0.9
 EPOCHS = 500
 BN_MIMENTUM = 0.9
 BN_EPSILON  = 0.00002
 LEAK = 0.1
-LOSS = 'hinge' #Or
-#LOSS = 'wasserstein' #Or
+#LOSS = 'hinge' #Or
+LOSS = 'wasserstein' #Or
 #LOSS = 'binary_crossentropy'
 
 if arg_list[1].lower == "dcgan":
@@ -47,7 +48,9 @@ if arg_list[3].lower == "GP":
     LAMDA = 10
 else:
     GP = False
-    
+ # GP is the gradient penalty!
+
+
 SAVE_DIR = 'img/{}/generated_img_CIFAR10_{}_{}_{}/'.format(LOSS, arg_list[1], arg_list[2], arg_list[3])
 
 if not os.path.isdir('img/'+LOSS):
@@ -271,13 +274,22 @@ if GP:
         plt.savefig(SAVE_DIR+'/loss.png')
         plt.clf()
 
+
+
         pickle.dump({'discriminator_loss': discriminator_loss, 
                      'generator_loss': generator_loss}, 
                     open(SAVE_DIR+'/loss-history.pkl', 'wb'))
 
 
 else:
+    discriminator_loss = np.zeros((3))
+    generator_loss = 0
+    callbacks_tb_generator = make_tb_callback(model=model_for_training_generator, log_path ='./logs/generator_W')
+    callbacks_tb_discriminator = make_tb_callback(model=model_for_training_discriminator, log_path ='./logs/discriminator_W')
+
+
     for epoch in range(EPOCHS):
+
         np.random.shuffle(X)
 
         print("epoch {} of {}".format(epoch+1, EPOCHS))
@@ -298,11 +310,11 @@ else:
                 noise = np.random.randn(BATCHSIZE, 128).astype(np.float32)
                 discriminator.trainable = True
                 generator.trainable = False
-                discriminator_loss.append(model_for_training_discriminator.train_on_batch([image_batch, noise],
+                discriminator_loss += (model_for_training_discriminator.train_on_batch([image_batch, noise],
                                                                                           [real_y, fake_y]))
             discriminator.trainable = False
             generator.trainable = True
-            generator_loss.append(model_for_training_generator.train_on_batch(np.random.randn(BATCHSIZE, 128), real_y))
+            generator_loss += (model_for_training_generator.train_on_batch(np.random.randn(BATCHSIZE, 128), real_y))
 
         print('\nepoch time: {}'.format(time()-start_time))
 
@@ -318,12 +330,17 @@ else:
         print('plot generated_image')
         plt.imsave('{}/epoch_{:03}.png'.format(SAVE_DIR, epoch), old)
         
-        plt.plot(discriminator_loss)
-        plt.plot(generator_loss)
-        plt.legend(['discriminator', 'real_D_loss', 'fake_D_loss', 'generator_loss'])
-        plt.savefig(SAVE_DIR+'/loss.png')
-        plt.clf()
+        # plt.plot(discriminator_loss)
+        # plt.plot(generator_loss)
+        # plt.legend(['discriminator', 'real_D_loss', 'fake_D_loss', 'generator_loss'])
+        # plt.savefig(SAVE_DIR+'/loss.png')
+        # plt.clf()
 
-        pickle.dump({'discriminator_loss': discriminator_loss, 
-                     'generator_loss': generator_loss}, 
-                    open(SAVE_DIR+'/loss-history.pkl', 'wb'))
+        # pickle.dump({'discriminator_loss': discriminator_loss,
+        #              'generator_loss': generator_loss},
+        #             open(SAVE_DIR+'/loss-history.pkl', 'wb'))
+
+        write_log(callbacks_tb_generator, ['generator_loss'], [generator_loss/int(X.shape[0] // (BATCHSIZE * TRAINING_RATIO))], epoch)
+        write_log(callbacks_tb_discriminator,['discriminator_loss','real_D_loss', 'fake_D_loss'], ( discriminator_loss/(TRAINING_RATIO * int(X.shape[0] // (BATCHSIZE * TRAINING_RATIO))) ).tolist(), epoch)
+        discriminator_loss = np.zeros((3))
+        generator_loss = 0
